@@ -1,0 +1,15 @@
+html, body, #root {
+  height: 100%;
+}
+body {
+  margin: 0;
+  /* Скролл всегда зарезервирован -> ширина контента не прыгает */
+  overflow-y: scroll;
+  /* На современных движках ещё лучше: фиксирует «канавку» для скролла */
+  scrollbar-gutter: stable both-edges;
+}
+
+/* Без 100vw! Используй ширину контейнера */
+:root {
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}

@@ -1,1 +1,16 @@
-node_modules
+# env / secrets
+**/.env*
+.env
+*.env
+
+# node
+**/node_modules/
+
+# builds
+**/dist/
+**/build/
+
+# misc
+.DS_Store
+npm-debug.log*
+yarn-error.log*
