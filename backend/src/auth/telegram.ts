@@ -2,7 +2,7 @@ import crypto from "crypto";
 import type { Request, Response, NextFunction } from "express";
 import type { AuthedUser } from "../types";
 
-const BOT_TOKEN = process.env.BOT_TOKEN || "";
+const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || ""; // <<< используем TELEGRAM_BOT_TOKEN
 
 function validateInitData(initData: string): { ok: boolean; data?: URLSearchParams } {
   try {
@@ -34,7 +34,7 @@ export function telegramAuth({ allowDev = false }: { allowDev?: boolean } = {}) 
     if (!ok || !data) {
       if (allowDev && process.env.NODE_ENV !== "production") {
         // Дев-режим без Телеграма (удобно для Postman/локалки)
-        req.user = { tgId: BigInt(999), username: "dev_user" };
+        (req as any).user = { tgId: BigInt(999), username: "dev_user" } as AuthedUser;
         return next();
       }
       return res.status(401).send("Invalid Telegram initData");
@@ -50,7 +50,7 @@ export function telegramAuth({ allowDev = false }: { allowDev?: boolean } = {}) 
       username: parsed?.username || null,
     };
 
-    req.user = user;
+    (req as any).user = user;
     next();
   };
 }

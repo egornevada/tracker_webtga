@@ -2,35 +2,41 @@ import "dotenv/config";
 import express from "express";
 import helmet from "helmet";
 import cors from "cors";
-import { telegramAuth } from './auth/telegram';
+
+// ВАЖНО: .js в относительных путях для ESM/NodeNext
+import { telegramAuth } from "./auth/telegram.js";
 import tasksRouter from "./routes/tasks.js";
 import type { Request, Response, NextFunction } from "express";
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
 
-// CORS
+// ===== CORS =====
 const allow = String(process.env.ALLOW_ORIGINS ?? process.env.ALLOWED_ORIGINS ?? "")
   .split(",")
-  .map(s => s.trim())
+  .map((s) => s.trim())
   .filter(Boolean);
 
-app.use(cors({
-  origin: (origin, cb) => {
-    if (!origin) return cb(null, true);            // Postman/curl
-    if (allow.includes(origin)) return cb(null, true);
-    cb(new Error("CORS blocked"));
-  },
-  credentials: false,
-  methods: ["GET","POST","PATCH","DELETE","OPTIONS"],
-  allowedHeaders: ["Content-Type","x-telegram-init-data"]
-}));
+app.use(
+  cors({
+    origin: (origin, cb) => {
+      if (!origin) return cb(null, true); // Postman/curl
+      if (allow.includes(origin)) return cb(null, true);
+      cb(new Error("CORS blocked"));
+    },
+    credentials: false,
+    methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "x-telegram-init-data"],
+  })
+);
 
-// Security headers
-app.use(helmet({
-  contentSecurityPolicy: false,        // CSP отдаёт фронт через Nginx
-  crossOriginEmbedderPolicy: false,
-}));
+// ===== Security headers =====
+app.use(
+  helmet({
+    contentSecurityPolicy: false, // CSP отдаёт фронт через Nginx
+    crossOriginEmbedderPolicy: false,
+  })
+);
 
 app.set("trust proxy", true);
 app.use(express.json());
@@ -59,7 +65,8 @@ app.post("/danger/delete-account", async (req, res) => {
 });
 
 // Глобальный обработчик ошибок
-app.use((err: any, _req: any, res: any, _next: any) => {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
   console.error(err);
   res.status(500).json({ error: "internal_error" });
 });
