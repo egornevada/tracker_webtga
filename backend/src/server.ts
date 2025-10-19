@@ -2,15 +2,15 @@ import "dotenv/config";
 import express from "express";
 import helmet from "helmet";
 import cors from "cors";
-import { telegramAuth } from "./auth/telegram";
-import tasksRouter from "./routes/tasks";
+import { telegramAuth } from './auth/telegram';
+import tasksRouter from "./routes/tasks.js";
 import type { Request, Response, NextFunction } from "express";
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
 
 // CORS
-const allow = String(process.env.ALLOW_ORIGINS || "")
+const allow = String(process.env.ALLOW_ORIGINS ?? process.env.ALLOWED_ORIGINS ?? "")
   .split(",")
   .map(s => s.trim())
   .filter(Boolean);
@@ -51,7 +51,7 @@ app.use("/tasks", tasksRouter);
 
 // Удалить аккаунт (вынесено на корень API)
 app.post("/danger/delete-account", async (req, res) => {
-  const { prisma } = await import("./prisma");
+  const { prisma } = await import("./prisma.js");
   const dbUser = await prisma.user.findUnique({ where: { tgId: req.user!.tgId } });
   if (!dbUser) return res.json({ ok: true });
   await prisma.user.delete({ where: { id: dbUser.id } });

@@ -27,8 +27,8 @@ r.get("/", async (req, res) => {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(weekStart)) return res.status(400).send("weekStart required");
 
   const dbUser = await prisma.user.upsert({
-    where: { tgId: user.tgId },
-    create: { tgId: user.tgId, username: user.username || undefined },
+    where: { tgId: String(user.tgId) },
+    create: { tgId: String(user.tgId), username: user.username || undefined },
     update: { username: user.username || undefined },
   });
 
@@ -47,8 +47,8 @@ r.post("/", async (req, res) => {
   if (!parsed.success) return res.status(400).json(parsed.error.flatten());
 
   const dbUser = await prisma.user.upsert({
-    where: { tgId: user.tgId },
-    create: { tgId: user.tgId, username: user.username || undefined },
+    where: { tgId: String(user.tgId) },
+    create: { tgId: String(user.tgId), username: user.username || undefined },
     update: { username: user.username || undefined },
   });
 
@@ -71,7 +71,7 @@ r.patch("/:id", async (req, res) => {
   if (!parsed.success) return res.status(400).json(parsed.error.flatten());
 
   const task = await prisma.task.findFirst({
-    where: { id: req.params.id, user: { tgId: user.tgId } },
+    where: { id: req.params.id, user: { tgId: String(user.tgId) } },
   });
   if (!task) return res.status(404).send("Not found");
 
@@ -90,7 +90,7 @@ r.post("/:id/log", async (req, res) => {
   if (!parsed.success) return res.status(400).json(parsed.error.flatten());
 
   const task = await prisma.task.findFirst({
-    where: { id: req.params.id, user: { tgId: user.tgId } },
+    where: { id: req.params.id, user: { tgId: String(user.tgId) } },
   });
   if (!task) return res.status(404).send("Not found");
 
@@ -112,7 +112,7 @@ r.post("/:id/log", async (req, res) => {
 r.delete("/:id", async (req, res) => {
   const user = req.user!;
   const task = await prisma.task.findFirst({
-    where: { id: req.params.id, user: { tgId: user.tgId } },
+    where: { id: req.params.id, user: { tgId: String(user.tgId) } },
     select: { id: true },
   });
   if (!task) return res.status(404).send("Not found");
@@ -122,9 +122,9 @@ r.delete("/:id", async (req, res) => {
 });
 
 // POST /danger/delete-account
-r.post("/../danger/delete-account", async (req, res) => {
+r.post("/danger/delete-account", async (req, res) => {
   const user = req.user!;
-  const dbUser = await prisma.user.findUnique({ where: { tgId: user.tgId } });
+  const dbUser = await prisma.user.findUnique({ where: { tgId: String(user.tgId) } });
   if (!dbUser) return res.json({ ok: true });
 
   await prisma.user.delete({ where: { id: dbUser.id } });
