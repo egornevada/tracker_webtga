@@ -7,3 +7,11 @@ dist/
 build/
 .DS_Store
 *.log
+# --- server-only / secrets / build ---
+.env
+backend/.env
+frontend/.env
+pgdata/
+frontend/dist/
+node_modules/
+*.log

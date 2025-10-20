@@ -1,6 +1,5 @@
 import { Router } from "express";
-import { prisma } from "../prisma";
-import type { Prisma } from "@prisma/client";
+import { prisma } from "../prisma.js";
 import { z } from "zod";
 
 const r = Router();
@@ -28,8 +27,8 @@ r.get("/", async (req, res) => {
 
   const dbUser = await prisma.user.upsert({
     where: { tgId: String(user.tgId) },
-    create: { tgId: String(user.tgId), username: user.username || undefined },
-    update: { username: user.username || undefined },
+    create: { tgId: String(user.tgId) },
+    update: {},
   });
 
   const tasks = await prisma.task.findMany({
@@ -48,8 +47,8 @@ r.post("/", async (req, res) => {
 
   const dbUser = await prisma.user.upsert({
     where: { tgId: String(user.tgId) },
-    create: { tgId: String(user.tgId), username: user.username || undefined },
-    update: { username: user.username || undefined },
+    create: { tgId: String(user.tgId) },
+    update: {},
   });
 
   const task = await prisma.task.create({
@@ -94,17 +93,13 @@ r.post("/:id/log", async (req, res) => {
   });
   if (!task) return res.status(404).send("Not found");
 
-  await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-    await tx.timeEntry.create({
-      data: { taskId: task.id, minutes: parsed.data.minutes },
-    });
-    await tx.task.update({
-      where: { id: task.id },
-      data: { totalLogged: Math.max(0, task.totalLogged + parsed.data.minutes) },
-    });
+  const newTotal = Math.max(0, task.totalLogged + parsed.data.minutes);
+
+  const fresh = await prisma.task.update({
+    where: { id: task.id },
+    data: { totalLogged: newTotal },
   });
 
-  const fresh = await prisma.task.findUnique({ where: { id: task.id } });
   res.json(fresh);
 });
 

@@ -1,125 +1,105 @@
-// src/lib/storage.ts
+// frontend/src/lib/storage.ts
 import type { Task } from "../types";
 
-/** ===== Helpers: localStorage + in-memory ===== */
+/** ====== Telegram initData ====== */
+function tgInitData(): string {
+  const w: any = window as any;
+  return (
+    w?.Telegram?.WebApp?.initData ??
+    w?.Telegram?.WebApp?.initDataUnsafe?._auth ??
+    ""
+  );
+}
 
-const memory = new Map<string, string>();
+/** ====== Синхронный запрос к нашему API (/api/...) ====== */
+function requestSync<T>(
+  path: string,
+  method: "GET" | "POST" | "PATCH" | "DELETE",
+  body?: unknown,
+  params?: Record<string, string>
+): T {
+  let url = `/api${path}`;
+  if (params && Object.keys(params).length) {
+    const qs = new URLSearchParams(params).toString();
+    url += `?${qs}`;
+  }
 
-function canUseLocalStorage(): boolean {
+  const xhr = new XMLHttpRequest();
+  xhr.open(method, url, false); // СИНХРОННО!
+
+  const initData = tgInitData();
+  if (initData) xhr.setRequestHeader("x-telegram-init-data", initData);
+  if (method !== "GET") xhr.setRequestHeader("Content-Type", "application/json");
+
   try {
-    const test = "__ls_test__";
-    localStorage.setItem(test, "1");
-    localStorage.removeItem(test);
-    return true;
-  } catch {
-    return false;
+    xhr.send(body ? JSON.stringify(body) : null);
+  } catch (e) {
+    throw new Error(`API network error: ${String(e)}`);
   }
-}
 
-function lsGet(key: string): string | null {
-  if (canUseLocalStorage()) {
-    try {
-      return localStorage.getItem(key);
-    } catch {}
+  if (xhr.status < 200 || xhr.status >= 300) {
+    throw new Error(`API ${xhr.status}: ${xhr.responseText || xhr.statusText}`);
   }
-  return memory.get(key) ?? null;
-}
 
-function lsSet(key: string, value: string) {
-  if (canUseLocalStorage()) {
-    try {
-      localStorage.setItem(key, value);
-      return;
-    } catch {}
-  }
-  memory.set(key, value);
-}
-
-function lsRemove(key: string) {
-  if (canUseLocalStorage()) {
-    try {
-      localStorage.removeItem(key);
-      return;
-    } catch {}
-  }
-  memory.delete(key);
-}
-
-/** ===== Ключи ===== */
-
-const APP_PREFIX = "trkr";
-export const keyFor = (tgId: string) => `${APP_PREFIX}:tasks:${tgId || "guest"}`;
-
-/** ===== Синхронное локальное API (как и было) ===== */
-
-export function loadTasks(tgId: string): Task[] {
-  const raw = lsGet(keyFor(tgId));
-  if (!raw) return [];
   try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as Task[]) : [];
+    return JSON.parse(xhr.responseText) as T;
   } catch {
-    return [];
+    return (xhr.responseText ? JSON.parse(xhr.responseText) : {}) as T;
   }
 }
-
-export function saveTasks(tgId: string, tasks: Task[]) {
-  lsSet(keyFor(tgId), JSON.stringify(tasks));
-}
-
-export function clearAll(tgId: string) {
-  lsRemove(keyFor(tgId));
-}
-
-/** ===== Telegram CloudStorage (опционально) ===== */
-
-type TgCloud = {
-  getItem: (k: string, cb: (err: unknown, v: string | null) => void) => void;
-  setItem: (k: string, v: string, cb: (err: unknown, ok: boolean) => void) => void;
-};
-
-function cloud(): TgCloud | null {
-  const cs = (window as any)?.Telegram?.WebApp?.CloudStorage;
-  if (cs && typeof cs.getItem === "function" && typeof cs.setItem === "function") {
-    return cs as TgCloud;
-  }
-  return null;
-}
-
-export const cloudAvailable = () => !!cloud();
 
 export function storageBackendName(): string {
-  if (cloudAvailable()) return "cloud+local";
-  if (canUseLocalStorage()) return "localStorage";
-  return "memory";
+  return "server-sync";
 }
 
-// Асинхронная загрузка из CloudStorage
-export function cloudLoadTasks(tgId: string): Promise<Task[] | null> {
-  const c = cloud();
-  if (!c) return Promise.resolve(null);
-  const key = keyFor(tgId);
-  return new Promise((resolve) => {
-    c.getItem(key, (err, value) => {
-      if (err) return resolve(null);
-      if (!value) return resolve([]);
-      try {
-        const parsed = JSON.parse(value);
-        resolve(Array.isArray(parsed) ? (parsed as Task[]) : []);
-      } catch {
-        resolve([]);
-      }
-    });
-  });
+/** ====== Совместимые синхронные сигнатуры (оверлоады) ====== */
+// loadTasks раньше вызывали и как loadTasks(weekStart), и как loadTasks(tgId, weekStart)
+export function loadTasks(weekStart: string): Task[];
+export function loadTasks(_tgId: string, weekStart: string): Task[];
+export function loadTasks(a: string, b?: string): Task[] {
+  const weekStart = b ?? a; // если пришёл 1 аргумент — это weekStart
+  return requestSync<Task[]>("/tasks", "GET", undefined, { weekStart });
 }
 
-// Асинхронное сохранение в CloudStorage
-export function cloudSaveTasks(tgId: string, tasks: Task[]): Promise<void> {
-  const c = cloud();
-  if (!c) return Promise.resolve();
-  const key = keyFor(tgId);
-  const payload = JSON.stringify(tasks);
-  return new Promise((resolve) => {
-    c.setItem(key, payload, () => resolve());
-  });
+// saveTasks встречался как saveTasks(tasks) и saveTasks(tgId, tasks) — делаем no-op
+export function saveTasks(tasks: Task[]): void;
+export function saveTasks(_tgId: string, tasks: Task[]): void;
+export function saveTasks(_a: string | Task[], _b?: Task[]): void {
+  // Ничего не делаем — все изменения идут через create/update/log/delete
 }
+
+// совместимые хелперы
+export function createTask(input: {
+  title: string;
+  targetMinutes: number;
+  weekStart: string;
+}): Task {
+  return requestSync<Task>("/tasks", "POST", input);
+}
+
+export function updateTask(
+  id: string,
+  patch: Partial<Pick<Task, "title" | "targetMinutes">>
+): Task {
+  return requestSync<Task>(`/tasks/${id}`, "PATCH", patch);
+}
+
+export function logTime(id: string, minutes: number): Task {
+  return requestSync<Task>(`/tasks/${id}/log`, "POST", { minutes });
+}
+
+export function deleteTask(id: string): { ok: true } {
+  return requestSync<{ ok: true }>(`/tasks/${id}`, "DELETE");
+}
+
+// clearAll могли звать и с tgId и без — делаем оба варианта
+export function clearAll(): void;
+export function clearAll(_tgId?: string): void;
+export function clearAll(_tgId?: string): void {
+  try { requestSync<{ ok: true }>(`/danger/delete-account`, "POST"); } catch {}
+}
+
+// CloudStorage не используем
+export const cloudAvailable = () => false;
+export const cloudLoadTasks = async () => null;
+export const cloudSaveTasks = async () => {};

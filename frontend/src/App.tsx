@@ -1,5 +1,5 @@
 // src/App.tsx
-import { useMemo, useState, useCallback, useEffect, useRef } from "react";
+import { useMemo, useState, useCallback, useEffect } from "react";
 import { Box, Stack, Typography } from "@mui/material";
 
 import Page from "./components/Page";
@@ -12,91 +12,19 @@ import SettingsDialog from "./components/SettingsDialog";
 import { startOfISOWeek } from "./lib/week";
 import type { Task } from "./types";
 
-// персистентность «на пользователя»
 import { getTgId } from "./lib/user";
-import {
-  loadTasks,
-  saveTasks,
-  clearAll,
-} from "./lib/storage";
-
+import * as api from "./lib/api";
 
 function Home() {
-  // ===== STATE =====
   const [tasks, setTasks] = useState<Task[]>([]);
   const [addTimeFor, setAddTimeFor] = useState<string | null>(null);
   const [editFor, setEditFor] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [openSettings, setOpenSettings] = useState(false);
 
-  const backendName = useMemo(() => {
-    try {
-      const k = "__probe__";
-      window.localStorage.setItem(k, "1");
-      window.localStorage.removeItem(k);
-      return "localStorage";
-    } catch {
-      return "memory";
-    }
-  }, []);
+  const backendName = "api";
+  const [userKey] = useState<string>(() => getTgId());
 
-  // стабильный ключ пользователя на время сессии
-  const [userKey, setUserKey] = useState<string>(() => getTgId());
-
-  // флажок «данные загружены», чтобы не затереть LS пустым массивом на старте
-  const didLoadRef = useRef(false);
-
-  // если сначала был "guest", а позже пришёл реальный tg id — однократно мигрируем
-  useEffect(() => {
-    let stopped = false;
-
-    const tryUpdate = () => {
-      if (stopped) return;
-      const runtimeId = getTgId();
-      if (runtimeId && runtimeId !== userKey) {
-        // если в guest что-то есть, а у нового id пусто — переносим
-        const guest = loadTasks(userKey);
-        const real = loadTasks(runtimeId);
-        if (guest.length && real.length === 0) {
-          saveTasks(runtimeId, guest);
-          if (userKey === "guest") clearAll("guest");
-        }
-        setUserKey(runtimeId);
-        stopped = true;
-      }
-    };
-
-    // моментальная проверка + короткий поллинг (до 5 сек)
-    tryUpdate();
-    const start = Date.now();
-    const id = setInterval(() => {
-      if (Date.now() - start > 5000) {
-        clearInterval(id);
-        return;
-      }
-      tryUpdate();
-    }, 500);
-
-    return () => {
-      stopped = true;
-      clearInterval(id);
-    };
-  }, [userKey]);
-
-  // загрузка задач при старте / смене userKey
-  useEffect(() => {
-    const initial = loadTasks(userKey);
-    setTasks(Array.isArray(initial) ? initial : []);
-    didLoadRef.current = true;
-
-    // сброс вспомогательных состояний
-    setAddTimeFor(null);
-    setEditFor(null);
-    setExpandedId(null);
-  }, [userKey]);
-
-
-  // ISO-понедельник текущей недели (для привязки задач)
   const weekStartISO = useMemo(() => {
     const d = startOfISOWeek(new Date());
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
@@ -104,74 +32,76 @@ function Home() {
     ).padStart(2, "0")}`;
   }, []);
 
-  // ===== CREATE из bottom-sheet хедера =====
+  useEffect(() => {
+    let canceled = false;
+    (async () => {
+      try {
+        const list = await api.api.get<Task[]>("/tasks", { weekStart: weekStartISO });
+        if (!canceled) setTasks(Array.isArray(list) ? list : []);
+      } catch (e) {
+        console.error(e);
+        if (!canceled) setTasks([]);
+      } finally {
+        if (!canceled) {
+          setAddTimeFor(null);
+          setEditFor(null);
+          setExpandedId(null);
+        }
+      }
+    })();
+    return () => { canceled = true; };
+  }, [weekStartISO]);
+
   const handleCreateInHeader = useCallback(
-    ({ title, hours }: { title: string; hours: number }) => {
-      const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-      const task: Task = {
-        id,
-        title: title.trim(),
-        targetMinutes: Math.max(1, Math.round(Number(hours) * 60)),
-        weekStart: weekStartISO,
-        totalLogged: 0,
-      };
-      setTasks((prev) => {
-        const next = [task, ...prev];
-        saveTasks(userKey, next);
-        return next;
-      });
-      // новая карточка остаётся закрытой
-      setExpandedId(null);
+    async ({ title, hours }: { title: string; hours: number }) => {
+      const targetMinutes = Math.max(1, Math.round(Number(hours) * 60));
+      try {
+        const created = await api.api.post<Task>("/tasks", {
+          title: title.trim(),
+          targetMinutes,
+          weekStart: weekStartISO,
+        });
+        setTasks((prev) => [created, ...prev]);
+        setExpandedId(null);
+      } catch (e) {
+        console.error(e);
+      }
     },
-    [weekStartISO, userKey]
+    [weekStartISO]
   );
 
-  // ===== UPDATE helpers =====
-  const addTime = useCallback(
-    (id: string, minutes: number) => {
-      setTasks((prev) => {
-        const next = prev.map((t) =>
-          t.id === id
-            ? { ...t, totalLogged: Math.max(0, t.totalLogged + minutes) }
-            : t
-        );
-        saveTasks(userKey, next);
-        return next;
-      });
-    },
-    [userKey]
-  );
+  const addTime = useCallback(async (id: string, minutes: number) => {
+    try {
+      const updated = await api.api.post<Task>(`/tasks/${id}/log`, { minutes });
+      setTasks((prev) => prev.map((t) => (t.id === id ? updated : t)));
+    } catch (e) {
+      console.error(e);
+    }
+  }, []);
 
-  const editTask = useCallback(
-    (id: string, data: { title: string; targetMinutes: number }) => {
-      setTasks((prev) => {
-        const next = prev.map((t) => (t.id === id ? { ...t, ...data } : t));
-        saveTasks(userKey, next);
-        return next;
-      });
-    },
-    [userKey]
-  );
+  const editTask = useCallback(async (id: string, data: { title: string; targetMinutes: number }) => {
+    try {
+      const updated = await api.api.patch<Task>(`/tasks/${id}`, data);
+      setTasks((prev) => prev.map((t) => (t.id === id ? updated : t)));
+    } catch (e) {
+      console.error(e);
+    }
+  }, []);
 
-  const deleteTask = useCallback(
-    (id: string) => {
-      setTasks((prev) => {
-        const next = prev.filter((t) => t.id !== id);
-        saveTasks(userKey, next);
-        return next;
-      });
+  const deleteTask = useCallback(async (id: string) => {
+    try {
+      await api.api.del<{ ok: true }>(`/tasks/${id}`);
+      setTasks((prev) => prev.filter((t) => t.id !== id));
       if (addTimeFor === id) setAddTimeFor(null);
       if (editFor === id) setEditFor(null);
       if (expandedId === id) setExpandedId(null);
-    },
-    [addTimeFor, editFor, expandedId, userKey]
-  );
+    } catch (e) {
+      console.error(e);
+    }
+  }, [addTimeFor, editFor, expandedId]);
 
-  const currentEdit = editFor
-    ? tasks.find((t) => t.id === editFor) ?? null
-    : null;
+  const currentEdit = editFor ? tasks.find((t) => t.id === editFor) ?? null : null;
 
-  // ===== RENDER =====
   return (
     <Page>
       <HeroHeader
@@ -181,10 +111,7 @@ function Home() {
       />
 
       {import.meta.env.DEV && (
-        <Typography
-          variant="caption"
-          sx={{ opacity: 0.6, px: 2, display: "block" }}
-        >
+        <Typography variant="caption" sx={{ opacity: 0.6, px: 2, display: "block" }}>
           storage: {userKey} · backend={backendName} · tasks={tasks.length}
         </Typography>
       )}
@@ -202,9 +129,7 @@ function Home() {
               key={t.id}
               task={t}
               expanded={expandedId === t.id}
-              onToggle={(id) =>
-                setExpandedId((prev) => (prev === id ? null : id))
-              }
+              onToggle={(id) => setExpandedId((prev) => (prev === id ? null : id))}
               onAddTime={(id) => setAddTimeFor(id)}
               onEdit={(id) => setEditFor(id)}
             />
@@ -212,7 +137,6 @@ function Home() {
         </Stack>
       </Box>
 
-      {/* Bottom sheets */}
       <AddTimeDialog
         open={!!addTimeFor}
         onClose={() => setAddTimeFor(null)}
@@ -226,10 +150,7 @@ function Home() {
         open={!!editFor}
         initial={
           currentEdit
-            ? {
-                title: currentEdit.title,
-                targetMinutes: currentEdit.targetMinutes,
-              }
+            ? { title: currentEdit.title, targetMinutes: currentEdit.targetMinutes }
             : null
         }
         onClose={() => setEditFor(null)}
@@ -246,14 +167,13 @@ function Home() {
       <SettingsDialog
         open={openSettings}
         onClose={() => setOpenSettings(false)}
-        onDeleteAll={() => {
+        onDeleteAll={async () => {
+          try { await api.api.post<{ ok: true }>("/danger/delete-account"); } catch (e) { console.error(e); }
           setTasks([]);
           setAddTimeFor(null);
           setEditFor(null);
           setExpandedId(null);
-          clearAll(userKey);
           setOpenSettings(false);
-          // (window as any)?.Telegram?.WebApp?.close?.(); // если нужно закрывать мини-апп
         }}
       />
     </Page>

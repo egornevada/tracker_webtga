@@ -3,6 +3,7 @@ import express from "express";
 import helmet from "helmet";
 import cors from "cors";
 
+// ВАЖНО: .js в относительных путях для ESM/NodeNext
 import { telegramAuth } from "./auth/telegram.js";
 import tasksRouter from "./routes/tasks.js";
 import type { Request, Response, NextFunction } from "express";
@@ -29,10 +30,10 @@ app.use(
   })
 );
 
-// ===== Security =====
+// ===== Security headers =====
 app.use(
   helmet({
-    contentSecurityPolicy: false,
+    contentSecurityPolicy: false, // CSP отдаёт фронт через Nginx
     crossOriginEmbedderPolicy: false,
   })
 );
@@ -40,49 +41,21 @@ app.use(
 app.set("trust proxy", true);
 app.use(express.json());
 
-// ===== Public =====
+// Health (публичный)
 app.get("/health", (_req, res) => res.json({ ok: true, ts: Date.now() }));
 
-// DEBUG: что реально прилетает в заголовках
-app.get("/debug/header", (req, res) => {
-  const raw = req.header("x-telegram-init-data") || "";
-  res.json({ hasInit: !!raw, len: raw.length });
-});
+// Ниже — приватные роуты (все требуют Telegram initData)
+app.use(telegramAuth({ allowDev: true })); // allowDev=true — удобно на локалке
 
-// Лёгкий логгер ДО авторизации (интересно, есть ли заголовок)
-app.use((req, _res, next) => {
-  if (req.path.startsWith("/tasks") || req.path.startsWith("/debug")) {
-    console.log(
-      `[dbg pre] ${req.method} ${req.path} hasInit=${!!req.header("x-telegram-init-data")}`
-    );
-  }
-  next();
-});
-
-// ===== Private (нужен Telegram initData) =====
-app.use(telegramAuth({ allowDev: true })); // в production allowDev всё равно не сработает
-
-// DEBUG: кто распарсился после авторизации
-app.get("/debug/me", (req, res) => {
-  res.json({ user: req.user ?? null });
-});
-
-// Логгер ПОСЛЕ авторизации — покажет tgId
-app.use((req, _res, next) => {
-  if (req.path.startsWith("/tasks")) {
-    const uid = req.user?.tgId ? req.user.tgId.toString() : null;
-    console.log(`[dbg post] ${req.method} ${req.path} user=${uid}`);
-  }
-  next();
-});
-
-// ===== Бизнес-ручки =====
+// Кто я
 app.get("/me", (req, res) => {
   res.json({ tgId: req.user!.tgId.toString(), username: req.user!.username });
 });
 
+// Задачи
 app.use("/tasks", tasksRouter);
 
+// Удалить аккаунт (вынесено на корень API)
 app.post("/danger/delete-account", async (req, res) => {
   const { prisma } = await import("./prisma.js");
   const dbUser = await prisma.user.findUnique({ where: { tgId: String(req.user!.tgId) } });
@@ -91,7 +64,8 @@ app.post("/danger/delete-account", async (req, res) => {
   res.json({ ok: true });
 });
 
-// ===== Errors =====
+// Глобальный обработчик ошибок
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
   console.error(err);
   res.status(500).json({ error: "internal_error" });
