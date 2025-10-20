@@ -58,7 +58,7 @@ app.use("/tasks", tasksRouter);
 // Удалить аккаунт (вынесено на корень API)
 app.post("/danger/delete-account", async (req, res) => {
   const { prisma } = await import("./prisma.js");
-  const dbUser = await prisma.user.findUnique({ where: { tgId: req.user!.tgId } });
+  const dbUser = await prisma.user.findUnique({ where: { tgId: String(req.user!.tgId) } });
   if (!dbUser) return res.json({ ok: true });
   await prisma.user.delete({ where: { id: dbUser.id } });
   res.json({ ok: true });
