@@ -1,15 +1,17 @@
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
 model User {
   id        String   @id @default(cuid())
   tgId      String   @unique
+  username  String?            
   createdAt DateTime @default(now())
   tasks     Task[]
 }
@@ -23,9 +25,21 @@ model Task {
   weekStart     String
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
+  timeEntries  TimeEntry[]
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([weekStart])
+}
+
+model TimeEntry {
+  id        String   @id @default(cuid())
+  taskId    String
+  minutes   Int
+  createdAt DateTime @default(now())
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
 }
